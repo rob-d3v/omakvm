@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Carries Mickey's keyboard and mouse into an X server that reads no devices.
+
+Mickey types and clicks through a virtual device of the kernel (uinput), which
+a real X server or a Wayland compositor picks up like any keyboard. A virtual
+X server (Xvfb, Xvnc: a screen that only exists in memory and is watched over
+VNC or a cast) reads no devices at all, so there the keys would land on the
+text console instead. This reads Mickey's virtual device, keeps it away from
+the console, and repeats every event on the X server through XTEST.
+
+    mickey-x11-bridge                 uses $DISPLAY (and $XAUTHORITY)
+    MICKEY_BRIDGE_LAYOUT="br abnt2"   also sets that keyboard layout on the X
+                                      server: Mickey sends keys by position
+
+Set up by `omakvm add-ssh`; part of omakvm (MIT). Needs python3, libX11 and
+libXtst. It never looks at which keys pass.
+"""
+import ctypes
+import fcntl
+import glob
+import os
+import struct
+import subprocess
+import sys
+import time
+
+DEVICE_NAME = "Mickey virtual input"
+EVIOCGRAB = 0x40044590
+EVENT = struct.Struct("llHHi")  # struct input_event, as this system lays it out
+EV_SYN, EV_KEY, EV_REL = 0, 1, 2
+REL_X, REL_Y, REL_HWHEEL, REL_WHEEL = 0, 1, 6, 8
+# evdev button -> X button
+BUTTONS = {0x110: 1, 0x111: 3, 0x112: 2, 0x113: 8, 0x114: 9}
+# X keycodes are evdev codes plus 8, on every X server with the evdev rules.
+KEYCODE_OFFSET = 8
+
+
+def say(text):
+    print("mickey-x11-bridge: " + text, flush=True)
+
+
+def open_display():
+    x11 = ctypes.CDLL("libX11.so.6")
+    xtst = ctypes.CDLL("libXtst.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x11.XFlush.argtypes = [ctypes.c_void_p]
+    for fake in (xtst.XTestFakeKeyEvent, xtst.XTestFakeButtonEvent):
+        fake.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+    xtst.XTestFakeRelativeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+    display = x11.XOpenDisplay(None)
+    if not display:
+        return None
+    major = ctypes.c_int()
+    if not xtst.XTestQueryExtension(ctypes.c_void_p(display), ctypes.byref(major), ctypes.byref(major),
+                                    ctypes.byref(major), ctypes.byref(major)):
+        sys.exit("mickey-x11-bridge: this X server has no XTEST extension")
+    return x11, xtst, display
+
+
+def find_device():
+    for name_file in glob.glob("/sys/class/input/event*/device/name"):
+        try:
+            if open(name_file).read().strip() == DEVICE_NAME:
+                return "/dev/input/" + name_file.split("/")[4]
+        except OSError:
+            pass
+    return None
+
+
+def click(xtst, display, button, times=1):
+    for _ in range(times):
+        xtst.XTestFakeButtonEvent(display, button, 1, 0)
+        xtst.XTestFakeButtonEvent(display, button, 0, 0)
+
+
+def carry(node, x11, xtst, display):
+    """Repeats the device's events on the X server until the device is gone."""
+    fd = os.open(node, os.O_RDONLY)
+    try:
+        # Taken from the console and from anything else that reads devices.
+        fcntl.ioctl(fd, EVIOCGRAB, 1)
+        say("carrying " + node + " to " + os.environ.get("DISPLAY", "?"))
+        dx = dy = 0
+        while True:
+            data = os.read(fd, EVENT.size * 64)
+            if not data:
+                return
+            for at in range(0, len(data) - EVENT.size + 1, EVENT.size):
+                _, _, kind, code, value = EVENT.unpack_from(data, at)
+                if kind == EV_KEY:
+                    if code in BUTTONS:
+                        xtst.XTestFakeButtonEvent(display, BUTTONS[code], 1 if value else 0, 0)
+                    elif code < 0x100 and value in (0, 1):
+                        xtst.XTestFakeKeyEvent(display, code + KEYCODE_OFFSET, value, 0)
+                elif kind == EV_REL:
+                    if code == REL_X:
+                        dx += value
+                    elif code == REL_Y:
+                        dy += value
+                    elif code == REL_WHEEL and value:
+                        click(xtst, display, 4 if value > 0 else 5, min(abs(value), 20))
+                    elif code == REL_HWHEEL and value:
+                        click(xtst, display, 7 if value > 0 else 6, min(abs(value), 20))
+                elif kind == EV_SYN:
+                    if dx or dy:
+                        xtst.XTestFakeRelativeMotionEvent(display, dx, dy, 0)
+                        dx = dy = 0
+                    x11.XFlush(display)
+    except OSError:
+        return
+    finally:
+        os.close(fd)
+
+
+def main():
+    opened = None
+    while opened is None:
+        # The X server may still be starting. If it later dies, Xlib ends
+        # this program and systemd starts it again.
+        opened = open_display()
+        if opened is None:
+            time.sleep(2)
+    x11, xtst, display = opened
+    display = ctypes.c_void_p(display)
+    layout = os.environ.get("MICKEY_BRIDGE_LAYOUT", "").split()
+    if layout and all(part.replace("_", "").replace("-", "").isalnum() for part in layout[:2]):
+        subprocess.run(["setxkbmap"] + layout[:2], check=False)
+    waiting = False
+    while True:
+        node = find_device()
+        if node is None or not os.access(node, os.R_OK):
+            if not waiting:
+                say("waiting for Mickey's virtual device")
+                waiting = True
+            time.sleep(1)
+            continue
+        waiting = False
+        carry(node, x11, xtst, display)
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()

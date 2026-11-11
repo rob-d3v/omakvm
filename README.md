@@ -192,12 +192,27 @@ A **32-bit ARM system** (a Raspberry Pi with a 32-bit Raspberry Pi OS, also unde
 64-bit kernel) is served by the fork described below: Mickey's own source reads and
 writes the kernel's input events in their 64-bit layout only.
 
+**A virtual X server** (Xvfb, Xvnc: a screen that only exists in memory and is watched
+over VNC or a cast) is a kiosk with one more thing missing: it reads no input devices,
+so what Mickey types on its virtual keyboard would land on the text console. There
+`add-ssh` also installs [`bin/mickey-x11-bridge`](bin/mickey-x11-bridge), a small
+service that reads Mickey's virtual device, keeps it from the console, and repeats
+every key, click and motion on that X server through XTEST. It needs `python3`,
+`libX11` and `libXtst` there. Since Mickey sends keys by position, the bridge also
+sets this PC's keyboard layout on that X server (`--layout "br abnt2"` to choose,
+`--display :1` for another display).
+
+A firewall on the other PC must let TCP 4242-4243 in (and UDP 4243-4244 for discovery
+and sound). `add-ssh` opens ufw when it is on; it never touches nftables or iptables
+rules written by hand, and says so when the PC does not come online.
+
 To undo it on that PC:
 
 ```bash
-sudo systemctl disable --now mickey.service; sudo rm -f /etc/systemd/system/mickey.service   # kiosk
+sudo systemctl disable --now mickey.service mickey-x11-bridge.service
+sudo rm -f /etc/systemd/system/mickey.service /etc/systemd/system/mickey-x11-bridge.service   # kiosk
 systemctl --user disable --now mickey.service; rm -f ~/.config/systemd/user/mickey.service    # session
-rm -rf ~/.local/bin/mickey ~/.local/bin/mickey-ui ~/.config/mickey ~/.local/share/mickey
+rm -rf ~/.local/bin/mickey ~/.local/bin/mickey-ui ~/.local/bin/mickey-x11-bridge ~/.config/mickey ~/.local/share/mickey
 sudo rm -f /etc/udev/rules.d/99-mickey-uinput.rules
 ```
 
@@ -267,7 +282,8 @@ Widget.qml           bar icon that follows `mickey status --waybar`
 PlainText.qml        every text in the panel: plain text, never markup
 Model.js             screens: layout and monitors.lua logic (Monitor Manager)
 Net.js               network PCs: Mickey's output, config.toml, placement
-bin/omakvm           install Mickey, add a PC over SSH, doctor
+bin/omakvm           install Mickey, add a PC over SSH, espanso, doctor
+bin/mickey-x11-bridge  on a PC whose screen is a virtual X server: Mickey's input into it
 i18n/                en.json, pt-BR.json
 packaging/           builds of Mickey: ARM64 (unchanged) and the fork
 test/                node tests for Model.js and Net.js
