@@ -1,0 +1,15 @@
+omakvm
+Copyright (c) 2026 rob-d3v
+
+This plugin includes code from Monitor Manager
+(https://github.com/FabioCuccaro/omarchy_monitor_manager),
+Copyright (c) 2026 Fabio Cuccaro, used under the MIT License:
+Model.js, the screens part of Panel.qml, the bar icon in Widget.qml,
+menu-entry.sh, test/model.test.js and test/fixtures.json.
+
+It drives Mickey (https://github.com/EduardoMG12/mickey), a separate program
+by EduardoMG12 under GPL-3.0-or-later, through its command line. No Mickey
+source is part of this repository. The mickey-linux-aarch64.tar.gz attached to
+this repository's releases is Mickey, built from its unchanged source by
+packaging/build-aarch64.sh, and is distributed under Mickey's own license,
+which is inside the tarball together with the commit it was built from.

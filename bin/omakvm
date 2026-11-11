@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+# omakvm helper: the steps the panel cannot do from inside the shell.
+#
+#   omakvm install [--from <tarball>]   install Mickey on this PC (asks for sudo once)
+#   omakvm add-ssh [options] user@host  install Mickey on a PC you reach by SSH and
+#                                       pair it with this one, without the six-digit code
+#   omakvm doctor                       say what is installed, running and paired
+#   omakvm root-setup <user>            (as root) only the part of install that needs root
+#
+# Mickey (https://github.com/EduardoMG12/mickey, GPL-3.0-or-later) is the program
+# that carries the keyboard, mouse and clipboard between PCs. This script downloads
+# its official release, checks it against Mickey's release key, and installs it the
+# way Mickey's own install.sh does.
+set -euo pipefail
+
+MICKEY_REPO="https://github.com/EduardoMG12/mickey"
+# Mickey publishes x86-64 only. The ARM64 build comes from this plugin's releases:
+# the same source, unchanged, compiled by packaging/build-aarch64.sh.
+ARM_RELEASES="${OMAKVM_ARM_RELEASES:-https://github.com/rob-d3v/omakvm/releases/latest/download}"
+# The Ed25519 key that signs Mickey's releases (packaging/release-key.pub there).
+MICKEY_KEY="d5cbc9a4c2b7b0b7c173827cd7be585adaa046cdf3c269b73c9f82600aa05602"
+PORT=4242
+
+export PATH="$HOME/.local/bin:$PATH"
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/omakvm"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mickey"
+data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/mickey"
+
+say() { printf '%s\n' "$*"; }
+step() { printf '\n==> %s\n' "$*"; }
+die() { printf 'omakvm: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "this needs \`$1\`, which is not installed"; }
+
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# ------------------------------------------------------------------ download
+
+# Mickey's signature is over SHA256SUMS; the sums then cover the tarball.
+verify_signature() {
+  local sums="$1" pem
+  need openssl
+  pem="$(mktemp)"
+  {
+    echo "-----BEGIN PUBLIC KEY-----"
+    printf '%b' "$(echo "302a300506032b6570032100$MICKEY_KEY" | sed 's/../\\x&/g')" | base64
+    echo "-----END PUBLIC KEY-----"
+  } >"$pem"
+  if ! openssl pkeyutl -verify -pubin -inkey "$pem" -rawin -in "$sums" -sigfile "$sums.sig" >/dev/null 2>&1; then
+    rm -f "$pem"
+    die "SHA256SUMS is not signed by Mickey's release key: nothing installed"
+  fi
+  rm -f "$pem"
+}
+
+# Prints the folder of an unpacked, checked release for <arch>.
+fetch_release() {
+  local arch="$1" from="${2:-}" dir tarball
+  need tar
+  dir="$cache/release-$arch"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  tarball="$dir/mickey-linux-$arch.tar.gz"
+  if [[ -n $from ]]; then
+    [[ -f $from ]] || die "$from is not a file"
+    cp "$from" "$tarball"
+    say "Using $from (not checked against a signature: you supplied it)" >&2
+  elif [[ $arch == x86_64 ]]; then
+    need curl
+    say "Downloading Mickey's latest release from $MICKEY_REPO" >&2
+    curl -fsSL --proto '=https' -o "$tarball" "$MICKEY_REPO/releases/latest/download/mickey-linux-x86_64.tar.gz"
+    curl -fsSL --proto '=https' -o "$dir/SHA256SUMS" "$MICKEY_REPO/releases/latest/download/SHA256SUMS"
+    curl -fsSL --proto '=https' -o "$dir/SHA256SUMS.sig" "$MICKEY_REPO/releases/latest/download/SHA256SUMS.sig"
+    verify_signature "$dir/SHA256SUMS"
+    (cd "$dir" && sha256sum -c --ignore-missing --status SHA256SUMS) \
+      || die "the download does not match Mickey's SHA256SUMS: nothing installed"
+    say "Signed by Mickey's release key, and unchanged" >&2
+  elif [[ $arch == aarch64 ]]; then
+    need curl
+    say "Mickey publishes no ARM64 build; downloading the one built for omakvm from its source" >&2
+    curl -fsSL --proto '=https' -o "$tarball" "$ARM_RELEASES/mickey-linux-aarch64.tar.gz" \
+      || die "no ARM64 build to download. Build one with packaging/build-aarch64.sh and pass it with --from"
+    curl -fsSL --proto '=https' -o "$dir/SHA256SUMS" "$ARM_RELEASES/SHA256SUMS"
+    (cd "$dir" && sha256sum -c --ignore-missing --status SHA256SUMS) \
+      || die "the download does not match its SHA256SUMS: nothing installed"
+  else
+    die "no Mickey build for $arch (x86_64 and aarch64 only)"
+  fi
+  tar -xzf "$tarball" -C "$dir"
+  local inner
+  inner="$(find "$dir" -maxdepth 2 -type f -name mickey -perm -u+x | head -n 1)"
+  [[ -n $inner ]] || die "the release holds no mickey program"
+  dirname "$inner"
+}
+
+# ------------------------------------------------------------------- install
+
+# What needs root, for <user>: let the input group create Mickey's virtual
+# keyboard and read the real one, open the firewall for the other PCs, and
+# make both work now rather than after the next restart.
+root_setup() {
+  local user="${1:-}"
+  [[ $(id -u) -eq 0 ]] || die "root-setup must run as root"
+  id "$user" >/dev/null 2>&1 || die "no such user: $user"
+  printf '%s\n' '# Lets the input group create Mickey'"'"'s virtual keyboard and mouse.' \
+    'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+    >/etc/udev/rules.d/99-mickey-uinput.rules
+  udevadm control --reload || true
+  modprobe uinput 2>/dev/null || true
+  chgrp input /dev/uinput && chmod 660 /dev/uinput
+  if ! id -nG "$user" | grep -qw input; then
+    usermod -aG input "$user"
+    echo "Added $user to the input group (in full effect after the next restart)"
+  fi
+  # The running session still has the old groups: grant this user the devices
+  # that exist now, so Mickey works before that restart.
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m "u:$user:rw" /dev/uinput /dev/input/event* 2>/dev/null || true
+  fi
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    echo "Letting other PCs reach Mickey through ufw (TCP 4242-4243, UDP 4243-4244)"
+    for port in 4242/tcp 4243/tcp 4243/udp 4244/udp; do ufw allow "$port" comment Mickey >/dev/null; done
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    echo "Letting other PCs reach Mickey through firewalld (TCP 4242-4243, UDP 4243-4244)"
+    for port in 4242/tcp 4243/tcp 4243/udp 4244/udp; do
+      firewall-cmd -q --permanent --add-port="$port"; firewall-cmd -q --add-port="$port"
+    done
+  fi
+}
+
+install_here() {
+  local from="" root=1 dir
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --from) from="${2:-}"; shift 2 ;;
+      --no-root) root=0; shift ;;
+      *) die "install: unknown option $1" ;;
+    esac
+  done
+  step "Getting Mickey"
+  dir="$(fetch_release "$(uname -m)" "$from")"
+  "$dir/mickey" --version >/dev/null 2>&1 \
+    || die "Mickey cannot start here; it needs PulseAudio's client library (Arch: sudo pacman -S libpulse; Debian/Ubuntu: sudo apt install libpulse0)"
+  if [[ $root -eq 1 ]]; then
+    step "Letting Mickey use the keyboard and mouse (sudo asks for your password once)"
+    say "  Every program you run as a member of the input group can read your"
+    say "  keyboard, not only Mickey. Install Mickey only on your own PCs."
+    sudo "$(readlink -f "$0")" root-setup "$USER"
+  fi
+  step "Installing Mickey for $USER"
+  # --update: Mickey's installer without its sudo steps, done above.
+  (cd "$dir" && sh ./install.sh --update)
+  if [[ ! -f $config_dir/config.toml ]]; then
+    mkdir -p "$config_dir"
+    printf '[this_pc]\nname = "%s"\n' "$(hostname | tr -d '"\\')" >"$config_dir/config.toml"
+  fi
+  systemctl --user restart mickey.service 2>/dev/null || true
+  step "Done"
+  "$dir/mickey" --version
+  say "Open the panel (the two-screens icon in the bar) and press Add PC."
+}
+
+# -------------------------------------------------------------------- doctor
+
+doctor() {
+  if ! command -v mickey >/dev/null 2>&1; then
+    say "mickey: not installed (omakvm install)"; return 1
+  fi
+  say "mickey: $(mickey --version 2>&1 | head -n 1)"
+  say "service: $(systemctl --user is-active mickey.service 2>/dev/null || true)"
+  if id -nG | grep -qw input; then say "input group: yes"
+  else say "input group: not in this session (restart this PC once after installing)"; fi
+  [[ -w /dev/uinput ]] && say "/dev/uinput: writable" || say "/dev/uinput: NOT writable"
+  say "fingerprint: $(mickey id 2>/dev/null | tail -n 1)"
+  say
+  mickey status 2>&1 || true
+  say
+  mickey peers 2>&1 | tr '\t' ' ' || true
+}
+
+# ------------------------------------------------------------------- add-ssh
+
+# Mickey as a service of the user's own session.
+session_unit() {
+  printf '%s\n' \
+    '[Unit]' \
+    'Description=Mickey: one keyboard and mouse for all your computers (set up by omakvm)' \
+    '# session: PartOf=graphical-session.target' \
+    '# session: After=graphical-session.target' \
+    '' \
+    '[Service]' \
+    'ExecStart=%h/.local/bin/mickey run' \
+    'Restart=on-failure' \
+    'RestartSec=3' \
+    '' \
+    '[Install]' \
+    'WantedBy=default.target'
+}
+
+# Mickey on a kiosk: a system service that still runs as <user>, in the input
+# group, with a copy of the X server's access cookie only <user> can read.
+# The copy is made as root right before Mickey starts; with no X server yet
+# that step fails and systemd tries again 3 s later.
+kiosk_unit() {
+  local user="$1" display="$2"
+  printf '%s\n' \
+    '[Unit]' \
+    'Description=Mickey: one keyboard and mouse for all your computers (set up by omakvm)' \
+    'After=network.target' \
+    '' \
+    '[Service]' \
+    "User=$user" \
+    'SupplementaryGroups=input' \
+    'RuntimeDirectory=mickey' \
+    "Environment=DISPLAY=$display XAUTHORITY=/run/mickey/xauth" \
+    "ExecStartPre=+/bin/sh -c 'a=\$\$(ps -C Xorg -o args= | sed -n \"s/.* -auth \\\\([^ ]*\\\\).*/\\\\1/p\" | head -n 1); [ -n \"\$\$a\" ] && [ -f \"\$\$a\" ] && install -m 600 -o $user \"\$\$a\" /run/mickey/xauth'" \
+    'ExecStart=@HOME@/.local/bin/mickey run' \
+    'Restart=always' \
+    'RestartSec=3' \
+    '' \
+    '[Install]' \
+    'WantedBy=multi-user.target'
+}
+
+toml_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+add_ssh() {
+  local name="" address="" from="" identity="" sshport="" target="" mode=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) name="${2:-}"; shift 2 ;;
+      --address) address="${2:-}"; shift 2 ;;
+      --from) from="${2:-}"; shift 2 ;;
+      -i) identity="${2:-}"; shift 2 ;;
+      -p) sshport="${2:-}"; shift 2 ;;
+      --kiosk) mode=kiosk; shift ;;
+      --session) mode=session; shift ;;
+      -*) die "add-ssh: unknown option $1" ;;
+      *) target="$1"; shift ;;
+    esac
+  done
+  [[ $target =~ ^([A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$ ]] \
+    || die "usage: omakvm add-ssh [--name <name>] [--address <ip>] [-i <key>] [-p <port>] [--from <tarball>] [--kiosk|--session] user@host"
+  command -v mickey >/dev/null 2>&1 || die "install Mickey on this PC first: omakvm install"
+  need ssh; need scp
+
+  local ctl ssh_opts=() scp_opts=()
+  ctl="$(mktemp -u "${XDG_RUNTIME_DIR:-/tmp}/omakvm-ssh.XXXXXX")"
+  ssh_opts=(-o ControlMaster=auto -o "ControlPath=$ctl" -o ControlPersist=120)
+  [[ -n $identity ]] && ssh_opts+=(-i "$identity" -o IdentitiesOnly=yes)
+  scp_opts=("${ssh_opts[@]}")
+  [[ -n $sshport ]] && { ssh_opts+=(-p "$sshport"); scp_opts+=(-P "$sshport"); }
+  # shellcheck disable=SC2064
+  trap "ssh -o ControlPath='$ctl' -O exit '$target' >/dev/null 2>&1 || true" EXIT
+  remote() { ssh "${ssh_opts[@]}" "$target" "$@"; }
+
+  step "Looking at $target"
+  local facts arch host ip
+  facts="$(remote 'uname -m; hostname; hostname -I 2>/dev/null | cut -d" " -f1; id -un; echo "x:$(ps -C Xorg -o user= 2>/dev/null | head -n 1 | tr -d " ")"; echo "d:$(ps -C Xorg -o args= 2>/dev/null | grep -o " :[0-9]\+" | head -n 1 | tr -d " ")"')" \
+    || die "cannot reach $target over SSH"
+  arch="$(sed -n 1p <<<"$facts")"; host="$(sed -n 2p <<<"$facts")"; ip="$(sed -n 3p <<<"$facts")"
+  local ruser xowner display
+  ruser="$(sed -n 4p <<<"$facts")"
+  xowner="$(sed -n 's/^x://p' <<<"$facts")"; display="$(sed -n 's/^d://p' <<<"$facts")"
+  [[ $ruser =~ ^[a-z_][a-z0-9_-]*$ ]] || die "unexpected user name on $target"
+  [[ $display =~ ^:[0-9]+$ ]] || display=":0"
+  # A kiosk: the screen belongs to an X server another user started (root,
+  # usually), so a service of the SSH user could not see its monitors or its
+  # clipboard. There Mickey runs as a system service, still as the SSH user,
+  # and is handed a copy of the X server's access cookie when it starts.
+  if [[ -z $mode ]]; then
+    if [[ -n $xowner && $xowner != "$ruser" ]]; then mode=kiosk; else mode=session; fi
+  fi
+  [[ -n $name ]] || name="$host"
+  [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]{0,62}$ ]] || die "the name \"$name\" has characters Mickey's config cannot hold; pass --name"
+  if [[ -z $address ]]; then
+    address="${target#*@}"
+    [[ $address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || address="$ip"
+  fi
+  [[ $address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "cannot tell $target's IP address; pass --address"
+  if [[ $mode == kiosk ]]; then say "$name: $arch at $address (kiosk: the screen is ${xowner:-another user}'s X server $display)"
+  else say "$name: $arch at $address (Mickey runs in $ruser's own session)"; fi
+
+  step "Getting Mickey for $arch"
+  local dir
+  dir="$(fetch_release "$arch" "$from")"
+
+  step "Installing Mickey on $name"
+  remote 'mkdir -p ~/.local/bin ~/.config/mickey ~/.local/share/mickey ~/.config/systemd/user'
+  scp -q "${scp_opts[@]}" "$dir/mickey" "$target:.local/bin/mickey.new"
+  [[ -f $dir/mickey-ui ]] && scp -q "${scp_opts[@]}" "$dir/mickey-ui" "$target:.local/bin/mickey-ui.new"
+  remote 'cd ~/.local/bin && chmod 755 mickey.new && mv mickey.new mickey && { [ ! -f mickey-ui.new ] || { chmod 755 mickey-ui.new && mv mickey-ui.new mickey-ui; }; } && ./mickey --version' \
+    || die "Mickey does not start on $name (it needs PulseAudio's client library: sudo apt install libpulse0)"
+
+  step "Letting Mickey create its virtual keyboard there (sudo on $name may ask for a password)"
+  # shellcheck disable=SC2016
+  local root_script='set -e
+u="$1"
+printf "%s\n" "KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"" > /etc/udev/rules.d/99-mickey-uinput.rules
+udevadm control --reload || true
+modprobe uinput 2>/dev/null || true
+chgrp input /dev/uinput && chmod 660 /dev/uinput
+id -nG "$u" | grep -qw input || usermod -aG input "$u"
+command -v setfacl >/dev/null 2>&1 && setfacl -m "u:$u:rw" /dev/uinput || chmod 666 /dev/uinput
+loginctl enable-linger "$u" 2>/dev/null || true
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+  for p in 4242/tcp 4243/tcp 4243/udp 4244/udp; do ufw allow "$p" comment Mickey >/dev/null; done
+fi'
+  ssh -t "${ssh_opts[@]}" "$target" "sudo sh -c $(printf '%q' "$root_script") sh \"\$(id -un)\"" \
+    || die "the root step failed on $name"
+
+  step "Pairing over SSH"
+  local mine theirs me
+  mine="$(mickey id --key | tr -d '[:space:]')"
+  [[ $mine =~ ^[0-9a-f]{64}$ ]] || die "cannot read this PC's Mickey key"
+  theirs="$(remote '~/.local/bin/mickey id --key' | tr -d '[:space:]')"
+  [[ $theirs =~ ^[0-9a-f]{64}$ ]] || die "cannot read $name's Mickey key"
+  me="$(hostname)"
+  # There: this PC's key is trusted, and that PC only receives.
+  # shellcheck disable=SC2016
+  remote 'f=~/.local/share/mickey/trusted_peers; touch "$f"; chmod 600 "$f"; grep -q "^'"$mine"'" "$f" || echo "'"$mine"' omakvm:'"${me//[^A-Za-z0-9._-]/_}"'" >> "$f"
+c=~/.config/mickey/config.toml
+[ -f "$c" ] || printf "[this_pc]\nname = \"%s\"\ncontrols_others = false\ncontrolled = true\n" "'"$(toml_escape "$name")"'" > "$c"'
+  # Here: its key is trusted, and it is a peer at that address with that key.
+  mkdir -p "$data_dir" "$config_dir"
+  touch "$data_dir/trusted_peers"; chmod 600 "$data_dir/trusted_peers"
+  grep -q "^$theirs" "$data_dir/trusted_peers" || echo "$theirs omakvm:$address" >>"$data_dir/trusted_peers"
+  touch "$config_dir/config.toml"
+  if grep -qF "\"$address:$PORT\"" "$config_dir/config.toml"; then
+    say "$address is already one of this PC's peers; left as it is"
+  else
+    cp -p "$config_dir/config.toml" "$config_dir/config.toml.bak.$(date +%Y%m%d%H%M%S)"
+    # Tables of peers go before the first plain [section], where Mickey writes them too.
+    local block
+    block="$(printf '[[peer]]\nname = "%s"\naddress = "%s:%s"\nkey = "%s"\n' "$(toml_escape "$name")" "$address" "$PORT" "$theirs")"
+    printf '%s\n\n%s' "$block" "$(cat "$config_dir/config.toml")" >"$config_dir/config.toml.new"
+    printf '\n' >>"$config_dir/config.toml.new"
+    mv "$config_dir/config.toml.new" "$config_dir/config.toml"
+  fi
+
+  step "Starting Mickey on $name"
+  local unit
+  if [[ $mode == kiosk ]]; then
+    unit="$(kiosk_unit "$ruser" "$display")"
+    printf '%s\n' "$unit" | remote 'cat > ~/.config/mickey/mickey.service.omakvm'
+    # shellcheck disable=SC2016
+    remote 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+systemctl --user disable -q --now mickey.service 2>/dev/null; rm -f ~/.config/systemd/user/mickey.service
+sed "s|@HOME@|$HOME|g" ~/.config/mickey/mickey.service.omakvm | sudo tee /etc/systemd/system/mickey.service >/dev/null
+rm -f ~/.config/mickey/mickey.service.omakvm
+sudo systemctl daemon-reload && sudo systemctl enable -q mickey.service && sudo systemctl restart mickey.service
+sleep 3; systemctl is-active mickey.service' \
+      || die "Mickey did not start on $name: ssh $target journalctl -u mickey -n 30"
+  else
+    unit="$(session_unit)"
+    printf '%s\n' "$unit" | remote 'cat > ~/.config/systemd/user/mickey.service'
+    # A board has no graphical-session.target to hang the service on; a
+    # desktop does, and there the service needs the session's environment.
+    # shellcheck disable=SC2016
+    remote 'export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if systemctl --user -q is-active graphical-session.target 2>/dev/null; then
+  sed -i "s|^# session: ||; s|^WantedBy=.*|WantedBy=graphical-session.target|" ~/.config/systemd/user/mickey.service
+else
+  sed -i "/^# session: /d" ~/.config/systemd/user/mickey.service
+fi
+systemctl --user daemon-reload && systemctl --user enable -q mickey.service && systemctl --user restart mickey.service
+sleep 2; systemctl --user is-active mickey.service' \
+      || die "Mickey did not start on $name: ssh $target journalctl --user -u mickey -n 30"
+  fi
+
+  step "Restarting Mickey here"
+  systemctl --user restart mickey.service 2>/dev/null || { mickey quit >/dev/null 2>&1 || true; mickey start; }
+  sleep 3
+  mickey peers 2>/dev/null | tr '\t' ' ' || true
+  step "Done"
+  say "$name is paired. Open the panel, switch On the layout on for it, and drag it"
+  say "next to your screens; or go there now with:  mickey go \"$name\""
+  say "Bring the keyboard home at any time by holding Right Shift for 3 seconds."
+}
+
+case "${1:-}" in
+  install) shift; install_here "$@" ;;
+  add-ssh) shift; add_ssh "$@" ;;
+  doctor) doctor ;;
+  root-setup) shift; root_setup "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) die "unknown command: $1 (try: omakvm --help)" ;;
+esac
