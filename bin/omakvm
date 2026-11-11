@@ -25,7 +25,7 @@ MICKEY_KEY="d5cbc9a4c2b7b0b7c173827cd7be585adaa046cdf3c269b73c9f82600aa05602"
 PORT=4242
 # The oldest glibc each build runs on.
 GLIBC_X86_64="2.35"
-GLIBC_AARCH64="2.31"
+GLIBC_AARCH64="2.36"
 
 export PATH="$HOME/.local/bin:$PATH"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/omakvm"

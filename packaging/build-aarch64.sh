@@ -2,7 +2,7 @@
 # Builds Mickey for ARM64 Linux from its unchanged source, in a container:
 #   packaging/build-aarch64.sh [tag]          (default: v0.4.5)
 # Leaves dist/mickey-linux-aarch64.tar.gz and dist/SHA256SUMS.
-# Needs docker and git. Debian bullseye, so the result runs on glibc 2.31 or newer.
+# Needs docker and git. Debian bookworm, so the result runs on glibc 2.36 or newer.
 set -euo pipefail
 tag="${1:-v0.4.5}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +11,7 @@ rm -rf "$work/src" "$work/pkg"
 mkdir -p "$work/cargo-registry" "$work/pkg/mickey-linux-aarch64" "$here/dist"
 git clone -q --depth 1 --branch "$tag" https://github.com/EduardoMG12/mickey.git "$work/src"
 
-docker run --rm -v "$work/src:/src" -v "$work/cargo-registry:/usr/local/cargo/registry" -w /src rust:1-bullseye bash -c '
+docker run --rm -v "$work/src:/src" -v "$work/cargo-registry:/usr/local/cargo/registry" -w /src rust:1-bookworm bash -c '
 set -eu
 dpkg --add-architecture arm64
 apt-get update -qq

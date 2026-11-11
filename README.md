@@ -157,7 +157,7 @@ What it cannot do:
 - **32-bit systems** (a Raspberry Pi running a 32-bit Raspberry Pi OS, even on a
   64-bit kernel). Mickey writes the kernel's 64-bit input events; it needs a 64-bit
   system image.
-- **glibc older than 2.31** on ARM64, or 2.35 on x86-64.
+- **glibc older than 2.36** on ARM64, or 2.35 on x86-64.
 - **A Wayland kiosk without the RemoteDesktop portal** gets the keyboard and mouse,
   but Mickey cannot learn its monitors, so there is no edge to cross: use the hotkeys.
 
@@ -177,8 +177,8 @@ and remove the PC in the panel here.
 Mickey publishes x86-64 builds only. For ARM64 targets (Raspberry Pi and the like),
 this repository's releases carry `mickey-linux-aarch64.tar.gz`: Mickey's source at
 the tag named in the release, unchanged, compiled by
-[`packaging/build-aarch64.sh`](packaging/build-aarch64.sh) (Debian bullseye,
-glibc 2.31). `SOURCE-COMMIT` inside the tarball names the commit, and Mickey's
+[`packaging/build-aarch64.sh`](packaging/build-aarch64.sh) (Debian bookworm,
+glibc 2.36). `SOURCE-COMMIT` inside the tarball names the commit, and Mickey's
 GPL-3.0 `LICENSE` is in it. Build your own and pass it with `--from` if you prefer:
 
 ```bash
