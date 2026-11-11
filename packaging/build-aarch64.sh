@@ -10,6 +10,9 @@ work="${XDG_CACHE_HOME:-$HOME/.cache}/omakvm/build-aarch64"
 rm -rf "$work/src" "$work/pkg"
 mkdir -p "$work/cargo-registry" "$work/pkg/mickey-linux-aarch64" "$here/dist"
 git clone -q --depth 1 --branch "$tag" https://github.com/EduardoMG12/mickey.git "$work/src"
+# v0.4.5 is this commit; another tag is built as it is.
+[ "$tag" != v0.4.5 ] || [ "$(git -C "$work/src" rev-parse HEAD)" = 3f88207cea1989dfe75281f8b08d58cc1d987da5 ] \
+  || { echo "v0.4.5 is not the commit this script expects" >&2; exit 1; }
 
 docker run --rm -v "$work/src:/src" -v "$work/cargo-registry:/usr/local/cargo/registry" -w /src rust:1-bookworm bash -c '
 set -eu
