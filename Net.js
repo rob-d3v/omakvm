@@ -413,6 +413,41 @@ function place(local, peers, peer) {
   peer.y = Math.round(top - b.y)
 }
 
+// Move a placed peer the shortest way that makes it share an edge with a
+// screen (or with a peer that already does) without covering anything. A PC
+// that touches nothing cannot be reached with the cursor, so a tile dropped
+// with a gap is pulled in. Returns true when it moved.
+function attach(local, peers, peer) {
+  if (!peer.placed) return false
+  var detached = detachedNames(local, peers)
+  if (detached.indexOf(peer.name) < 0 && overlappingNames(local, peers).indexOf(peer.name) < 0) return false
+  var anchors = local.concat(rects(peers).filter(function(r) {
+    return r.name !== peer.name && detached.indexOf(r.name) < 0
+  }))
+  if (!anchors.length) return false
+  var r = rect(peer)
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+  var best = null
+  anchors.forEach(function(o) {
+    // keep at least a quarter of the shorter side in common along the edge
+    var kv = Math.max(1, Math.min(r.height, o.height) / 4)
+    var kh = Math.max(1, Math.min(r.width, o.width) / 4)
+    var y = clamp(r.y, o.y - r.height + kv, o.y + o.height - kv)
+    var x = clamp(r.x, o.x - r.width + kh, o.x + o.width - kh)
+    var cands = [[o.x + o.width, y], [o.x - r.width, y], [x, o.y + o.height], [x, o.y - r.height]]
+    cands.forEach(function(c) {
+      var moved = { x: Math.round(c[0]), y: Math.round(c[1]), width: r.width, height: r.height }
+      if (anchors.some(function(a) { return intersects(moved, a) })) return
+      var d = Math.abs(moved.x - r.x) + Math.abs(moved.y - r.y)
+      if (best === null || d < best.d) best = { d: d, x: moved.x, y: moved.y }
+    })
+  })
+  if (!best) { place(local, peers, peer); return true }
+  peer.x += best.x - r.x
+  peer.y += best.y - r.y
+  return true
+}
+
 // Which side of this PC's screens the peer sits on, for the sidebar:
 // "left", "right", "above", "below" or "".
 function side(local, peer) {

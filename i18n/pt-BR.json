@@ -29,7 +29,7 @@
   "try.revert": "Voltar",
   "try.keepButton": "Manter",
   "warn.overlap": "%1 estão sobrepostos",
-  "warn.detached": "%1 sem encostar nas outras telas",
+  "warn.detached": "%1 sem encostar em nada",
   "side.screens": "Telas",
   "side.off": "desligada",
   "side.mirrors": "espelha %1",
@@ -121,5 +121,6 @@
   "status.removed": "%1 removido.",
   "bar.remote": "Teclado e mouse em %1. Segure o Shift direito por 3 s para trazer de volta.",
   "bar.local": "Telas e PCs da rede",
-  "bar.off": "Telas e PCs da rede (o Mickey não está rodando)"
+  "bar.off": "Telas e PCs da rede (o Mickey não está rodando)",
+  "status.attached": "%1 foi encostado na borda mais próxima: um PC que não encosta em nenhuma tela não é alcançado pelo cursor."
 }

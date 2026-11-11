@@ -29,7 +29,7 @@
   "try.revert": "Revert",
   "try.keepButton": "Keep",
   "warn.overlap": "%1 overlap",
-  "warn.detached": "%1 not touching the other screens",
+  "warn.detached": "%1 touching nothing",
   "side.screens": "Screens",
   "side.off": "off",
   "side.mirrors": "mirrors %1",
@@ -121,5 +121,6 @@
   "status.removed": "%1 removed.",
   "bar.remote": "Keyboard and mouse on %1. Hold Right Shift for 3 s to bring them home.",
   "bar.local": "Screens and network PCs",
-  "bar.off": "Screens and network PCs (Mickey is not running)"
+  "bar.off": "Screens and network PCs (Mickey is not running)",
+  "status.attached": "%1 moved against the nearest edge: a PC that touches no screen cannot be reached with the cursor."
 }

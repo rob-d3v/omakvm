@@ -150,6 +150,21 @@ check('detached: gap', N.detachedNames(local, peers), ['Kiosk'])
 peers[1].x = -1920; peers[1].y = 0
 check('side: left', N.side(local, peers[1]), 'left')
 
+// a tile dropped with a gap is pulled against the nearest edge
+const loose = [{ name: 'P', placed: true, x: 4028, y: 747, monitors: [{ x: 0, y: 0, width: 1920, height: 1080 }] }]
+check('attach: detached before', N.detachedNames(local, loose), ['P'])
+check('attach: moved', N.attach(local, loose, loose[0]), true)
+check('attach: against the laptop screen, same height', [loose[0].x, loose[0].y], [3840, 747])
+check('attach: reachable now', [N.detachedNames(local, loose), N.overlappingNames(local, loose)], [[], []])
+check('attach: nothing to do', N.attach(local, loose, loose[0]), false)
+loose[0].x = 3000; loose[0].y = 5000
+N.attach(local, loose, loose[0])
+check('attach: far below goes under the nearest screen', [loose[0].x, loose[0].y, N.detachedNames(local, loose)], [3000, 1228, []])
+loose[0].x = 1000; loose[0].y = 200
+check('attach: a tile on top of a screen is moved off it', [N.attach(local, loose, loose[0]), N.overlappingNames(local, loose), N.detachedNames(local, loose)], [true, [], []])
+loose[0].placed = false
+check('attach: off the layout is left alone', N.attach(local, loose, loose[0]), false)
+
 const snap = N.snapshot(peers)
 peers[0].placed = false
 check('snapshot differs', N.sameSnapshot(snap, N.snapshot(peers)), false)

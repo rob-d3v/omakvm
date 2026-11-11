@@ -114,7 +114,8 @@ Item {
     var bad = Model.overlappingNames(root.monitors).concat(root.overlappingPeers)
     if (bad.length) out.push(strings.t("warn.overlap").arg(bad.join(", ")))
     var far = Model.detachedMonitors(Model.layoutMonitors(root.monitors))
-    if (far.length) out.push(strings.t("warn.detached").arg(far.map(function(m) { return m.name }).join(", ")))
+    var lost = far.map(function(m) { return m.name }).concat(root.detachedPeers)
+    if (lost.length) out.push(strings.t("warn.detached").arg(lost.join(", ")))
     return out
   }
 
@@ -610,6 +611,7 @@ Item {
       return
     }
     root.normalize()
+    root.peers.forEach(function(p) { Net.attach(root.localRects(), root.peers, p) })
     root.changed()
     root.pendingPeerSave = root.peersDirty
     var text = Model.updateConfigText(root.configText, root.monitors)
@@ -664,6 +666,7 @@ Item {
       if (p[axis] === want) return
       root.pushUndo()
       p[axis] = want
+      Net.attach(root.localRects(), root.peers, p)
       root.changed()
       return
     }
@@ -803,10 +806,9 @@ Item {
   function fix() {
     var before = root.takeSnapshot()
     var did = Model.autoArrange(root.monitors)
-    // PCs that overlap something go to the right of everything.
-    root.overlappingPeers.forEach(function(name) {
-      var p = root.peers.find(function(o) { return o.name === name })
-      if (p) { Net.place(root.localRects(), root.peers, p); did = true }
+    // PCs that cover something or touch nothing go against the nearest edge.
+    root.peers.forEach(function(p) {
+      if (Net.attach(root.localRects(), root.peers, p)) did = true
     })
     if (!did) return
     root.undoStack.push(before)
@@ -1248,6 +1250,9 @@ Item {
                 onReleased: {
                   canvas.frozen = false
                   canvas.guides = []
+                  // A PC that touches nothing cannot be reached with the cursor.
+                  if (pc.peer && Net.attach(root.localRects(), root.peers, pc.peer))
+                    root.statusText = strings.t("status.attached").arg(pc.modelData)
                   root.changed()
                 }
               }
