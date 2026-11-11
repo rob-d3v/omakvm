@@ -9,7 +9,12 @@ menu-entry.sh, test/model.test.js and test/fixtures.json.
 
 It drives Mickey (https://github.com/EduardoMG12/mickey), a separate program
 by EduardoMG12 under GPL-3.0-or-later, through its command line. No Mickey
-source is part of this repository. The mickey-linux-aarch64.tar.gz attached to
-this repository's releases is Mickey, built from its unchanged source by
-packaging/build-aarch64.sh, and is distributed under Mickey's own license,
-which is inside the tarball together with the commit it was built from.
+source is part of this repository.
+
+The tarballs attached to this repository's releases are Mickey, distributed
+under Mickey's own license, which is inside each one together with the commit
+it was built from:
+  mickey-linux-aarch64      Mickey's unchanged source (packaging/build-aarch64.sh)
+  mickey-fork-linux-*       Mickey with the changes in
+                            https://github.com/rob-d3v/mickey (branch omakvm),
+                            built by packaging/build-fork.sh

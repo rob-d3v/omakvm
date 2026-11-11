@@ -107,6 +107,35 @@ Saving the PCs writes each one's `position` in `~/.config/mickey/config.toml` (a
 backup is kept, last 10) and runs `mickey arranged`, which also tells the other PCs.
 When only a PC moved, `monitors.lua` and Hyprland are left alone.
 
+### espanso: your triggers on the other PC
+
+A text expander such as [espanso](https://espanso.org) reads the keyboards itself.
+While the keyboard is on another PC, Mickey holds them, so espanso hears nothing and
+your triggers stop working there. To make them work:
+
+```bash
+~/.config/omarchy/plugins/io.github.rob-d3v.omakvm/bin/omakvm espanso on
+```
+
+It asks for your password once and:
+
+1. replaces Mickey in `~/.local/bin` with the fork (the official build is kept beside
+   it and `omakvm espanso off` puts it back);
+2. installs a udev rule so the desktop ignores a new virtual keyboard, *Mickey typing
+   mirror* (`LIBINPUT_IGNORE_DEVICE`);
+3. starts Mickey with `MICKEY_TYPING_MIRROR=1`: what you type for the other PC is
+   repeated on that mirror, which only espanso reads. espanso sees the trigger and
+   types the expansion through its own virtual keyboard, which Mickey sends to the
+   other PC like any key;
+4. sets espanso to `backend: Inject`, so an expansion is typed key by key. Otherwise
+   espanso pastes long text from this PC's clipboard with Ctrl+V, and the other PC
+   has another clipboard;
+5. turns Mickey's self-update off on this PC, since it would put the official build back.
+
+`omakvm espanso status` says what is in place. Both PCs need the same keyboard
+layout, since the text arrives as keys. Passwords typed this way also pass through
+the mirror, which programs in the `input` group can read, like the keyboard itself.
+
 ### A PC without a screen for the code: Add over SSH
 
 Pairing in Mickey means comparing a code on both screens. A board behind a wall
@@ -154,12 +183,14 @@ Two kinds of target are told apart on their own (`--kiosk` / `--session` overrid
 
 What it cannot do:
 
-- **32-bit systems** (a Raspberry Pi running a 32-bit Raspberry Pi OS, even on a
-  64-bit kernel). Mickey writes the kernel's 64-bit input events; it needs a 64-bit
-  system image.
-- **glibc older than 2.36** on ARM64, or 2.35 on x86-64.
+- **ARMv6 boards** (Raspberry Pi 1 and Zero) and 32-bit x86.
+- **glibc older than** 2.28 on 32-bit ARM, 2.36 on ARM64, 2.35 on x86-64.
 - **A Wayland kiosk without the RemoteDesktop portal** gets the keyboard and mouse,
   but Mickey cannot learn its monitors, so there is no edge to cross: use the hotkeys.
+
+A **32-bit ARM system** (a Raspberry Pi with a 32-bit Raspberry Pi OS, also under a
+64-bit kernel) is served by the fork described below: Mickey's own source reads and
+writes the kernel's input events in their 64-bit layout only.
 
 To undo it on that PC:
 
@@ -172,22 +203,39 @@ sudo rm -f /etc/udev/rules.d/99-mickey-uinput.rules
 
 and remove the PC in the panel here.
 
-### ARM64
+### The builds this repository publishes
 
-Mickey publishes x86-64 builds only. For ARM64 targets (Raspberry Pi and the like),
-this repository's releases carry `mickey-linux-aarch64.tar.gz`: Mickey's source at
-the tag named in the release, unchanged, compiled by
-[`packaging/build-aarch64.sh`](packaging/build-aarch64.sh) (Debian bookworm,
-glibc 2.36). `SOURCE-COMMIT` inside the tarball names the commit, and Mickey's
-GPL-3.0 `LICENSE` is in it. Build your own and pass it with `--from` if you prefer:
+Mickey publishes x86-64 builds of its own. The releases here carry what is missing:
+
+| File | What it is | For |
+| --- | --- | --- |
+| `mickey-linux-aarch64.tar.gz` | Mickey's source at the release's tag, **unchanged** | ARM64 PCs added over SSH |
+| `mickey-fork-linux-armv7.tar.gz` | the fork | 32-bit ARM PCs added over SSH |
+| `mickey-fork-linux-x86_64.tar.gz` | the fork | `omakvm espanso on` on this PC |
+
+**The fork** is [rob-d3v/mickey, branch `omakvm`](https://github.com/rob-d3v/mickey/tree/omakvm):
+Mickey v0.4.5 plus three changes, in one commit:
+
+- **32-bit Linux.** `ioctl`'s request and the time at the start of `struct input_event`
+  are C `long`s, 4 bytes narrower there.
+- **Devices plugged in later.** Mickey looks for its keyboards once, when it starts.
+  The fork looks again every 2 s: a keyboard that drops off a USB hub and comes back,
+  or a text expander that restarts with a new virtual keyboard, is picked up, and
+  grabbed if the focus is away.
+- **The typing mirror**, off unless `MICKEY_TYPING_MIRROR=1` (see *espanso* above in this page).
+
+Every tarball has `SOURCE-COMMIT` (the commit it was built from) and Mickey's GPL-3.0
+`LICENSE`. Build your own with [`packaging/build-aarch64.sh`](packaging/build-aarch64.sh)
+and [`packaging/build-fork.sh`](packaging/build-fork.sh) (they need docker), and pass
+the result with `--from`:
 
 ```bash
-packaging/build-aarch64.sh v0.4.5
-bin/omakvm add-ssh --from dist/mickey-linux-aarch64.tar.gz user@192.168.0.20
+packaging/build-fork.sh armv7
+bin/omakvm add-ssh --from dist/mickey-fork-linux-armv7.tar.gz user@192.168.0.20
 ```
 
-Mickey itself does not update an ARM64 install (its updater looks for the x86-64
-release); run `add-ssh` again with a newer tarball.
+Mickey's own updater knows only its x86-64 release, so a PC set up here does not
+update itself: run `add-ssh` (or `espanso on`) again with a newer build.
 
 ## Good to know
 
@@ -195,10 +243,7 @@ release); run `add-ssh` again with a newer tarball.
 - **Local network only.** Mickey has no relay; neither has this.
 - **The cursor crosses where the tiles touch**, over the length they share. A PC
   placed off to one side with a gap is reached with the hotkeys only.
-- **Text expanders.** While the keyboard is on another PC, Mickey holds your real
-  keyboard, so an expander on this PC may not see what you type. What it types
-  through its own virtual keyboard does travel if that keyboard existed when Mickey
-  started. The clipboard always follows: copy here, cross, paste there.
+- **Text expanders** need `omakvm espanso on` to see what you type on another PC.
 - **Try** applies the screens only. PCs move when you **Save**.
 - Mickey's own limits (Windows secure screens, GNOME's clipboard, touchpad taps) are
   in [its README](https://github.com/EduardoMG12/mickey#known-limits).
@@ -224,7 +269,7 @@ Model.js             screens: layout and monitors.lua logic (Monitor Manager)
 Net.js               network PCs: Mickey's output, config.toml, placement
 bin/omakvm           install Mickey, add a PC over SSH, doctor
 i18n/                en.json, pt-BR.json
-packaging/           the ARM64 build of Mickey
+packaging/           builds of Mickey: ARM64 (unchanged) and the fork
 test/                node tests for Model.js and Net.js
 ```
 
@@ -239,5 +284,5 @@ Changed QML is only picked up reliably after `omarchy restart shell`.
 
 [MIT](LICENSE). The screens code is © 2026 Fabio Cuccaro; see [NOTICE](NOTICE).
 Mickey is a separate program under GPL-3.0-or-later and is not part of this
-repository's source; the ARM64 tarball attached to releases is Mickey, under its
-own license.
+repository's source. The tarballs attached to releases are Mickey (unchanged, or
+the fork at https://github.com/rob-d3v/mickey), under Mickey's own license.

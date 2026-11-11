@@ -4,6 +4,8 @@
 #   omakvm install [--from <tarball>]   install Mickey on this PC (asks for sudo once)
 #   omakvm add-ssh [options] user@host  install Mickey on a PC you reach by SSH and
 #                                       pair it with this one, without the six-digit code
+#   omakvm espanso on|off|status        let espanso's triggers work while the keyboard is
+#                                       on another PC (and find keyboards plugged in later)
 #   omakvm doctor                       say what is installed, running and paired
 #   omakvm root-setup <user>            (as root) only the part of install that needs root
 #
@@ -17,8 +19,12 @@
 set -euo pipefail
 
 MICKEY_REPO="https://github.com/EduardoMG12/mickey"
-# Mickey publishes x86-64 only. The ARM64 build comes from this plugin's releases:
-# the same source, unchanged, compiled by packaging/build-aarch64.sh.
+# Mickey publishes x86-64 only. This plugin's releases carry the rest:
+#   mickey-linux-aarch64         Mickey's source, unchanged (packaging/build-aarch64.sh)
+#   mickey-fork-linux-armv7      for 32-bit ARM, which Mickey's own source cannot serve
+#   mickey-fork-linux-x86_64     for `omakvm espanso on`
+# The fork is https://github.com/rob-d3v/mickey, branch omakvm: Mickey plus 32-bit
+# Linux, devices plugged in later, and the typing mirror (packaging/build-fork.sh).
 ARM_RELEASES="${OMAKVM_ARM_RELEASES:-https://github.com/rob-d3v/omakvm/releases/latest/download}"
 # The Ed25519 key that signs Mickey's releases (packaging/release-key.pub there).
 MICKEY_KEY="d5cbc9a4c2b7b0b7c173827cd7be585adaa046cdf3c269b73c9f82600aa05602"
@@ -26,6 +32,8 @@ PORT=4242
 # The oldest glibc each build runs on.
 GLIBC_X86_64="2.35"
 GLIBC_AARCH64="2.36"
+GLIBC_ARMV7="2.28"
+MIRROR_NAME="Mickey typing mirror"
 
 export PATH="$HOME/.local/bin:$PATH"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/omakvm"
@@ -37,7 +45,7 @@ step() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nomakvm: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "this needs \`$1\`, which is not installed"; }
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ------------------------------------------------------------------ download
 
@@ -80,16 +88,25 @@ fetch_release() {
     (cd "$dir" && sha256sum -c --ignore-missing --status SHA256SUMS) \
       || die "the download does not match Mickey's SHA256SUMS: nothing installed"
     say "Signed by Mickey's release key, and unchanged" >&2
-  elif [[ $arch == aarch64 ]]; then
+  elif [[ $arch == aarch64 || $arch == armv7 || $arch == fork-x86_64 ]]; then
     need curl
-    say "Mickey publishes no ARM64 build; downloading the one built for omakvm from its source" >&2
-    curl -fsSL --proto '=https' -o "$tarball" "$ARM_RELEASES/mickey-linux-aarch64.tar.gz" \
-      || die "no ARM64 build to download. Build one with packaging/build-aarch64.sh and pass it with --from"
+    local asset
+    case "$arch" in
+      aarch64) asset=mickey-linux-aarch64.tar.gz
+        say "Mickey publishes no ARM64 build; downloading the one built for omakvm from its source" >&2 ;;
+      armv7) asset=mickey-fork-linux-armv7.tar.gz
+        say "Mickey's own source does not work on 32-bit ARM; downloading omakvm's fork of it" >&2 ;;
+      *) asset=mickey-fork-linux-x86_64.tar.gz
+        say "Downloading omakvm's fork of Mickey (typing mirror, devices plugged in later)" >&2 ;;
+    esac
+    tarball="$dir/$asset"
+    curl -fsSL --proto '=https' -o "$tarball" "$ARM_RELEASES/$asset" \
+      || die "could not download $asset. Build it with packaging/ and pass it with --from"
     curl -fsSL --proto '=https' -o "$dir/SHA256SUMS" "$ARM_RELEASES/SHA256SUMS"
     (cd "$dir" && sha256sum -c --ignore-missing --status SHA256SUMS) \
       || die "the download does not match its SHA256SUMS: nothing installed"
   else
-    die "no Mickey build for $arch (x86_64 and aarch64 only)"
+    die "no Mickey build for $arch"
   fi
   tar -xzf "$tarball" -C "$dir"
   local inner
@@ -181,6 +198,124 @@ doctor() {
   mickey status 2>&1 || true
   say
   mickey peers 2>&1 | tr '\t' ' ' || true
+}
+
+# ------------------------------------------------------------------- espanso
+
+# espanso reads the keyboards itself. While the keyboard is on another PC,
+# Mickey holds them, so espanso hears nothing and its triggers stop. The fork
+# repeats what you type for the other PC on a virtual keyboard ("typing
+# mirror") that only espanso reads; what espanso then types leaves through its
+# own virtual keyboard, which Mickey sends to the other PC like any key.
+espanso_dropin="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/mickey.service.d/omakvm-espanso.conf"
+espanso_config="${XDG_CONFIG_HOME:-$HOME/.config}/espanso/config/default.yml"
+espanso_rule="/etc/udev/rules.d/99-mickey-typing-mirror.rules"
+
+# As root: the desktop must not read the mirror, or the keys would also be
+# typed on this PC.
+root_espanso() {
+  [[ $(id -u) -eq 0 ]] || die "root-espanso must run as root"
+  printf '%s\n' "# omakvm: the desktop (libinput) ignores Mickey's typing mirror; only text expanders read it." \
+    "SUBSYSTEM==\"input\", ATTRS{name}==\"$MIRROR_NAME\", ENV{LIBINPUT_IGNORE_DEVICE}=\"1\"" >"$espanso_rule"
+  udevadm control --reload
+}
+
+mirror_node() {
+  local f
+  for f in /sys/class/input/event*/device/name; do
+    [[ -f $f && $(cat "$f") == "$MIRROR_NAME" ]] && { echo "/dev/input/$(basename "$(dirname "$(dirname "$f")")")"; return 0; }
+  done
+  return 1
+}
+
+espanso_status() {
+  local node
+  [[ -f $HOME/.local/bin/.mickey-omakvm-fork ]] && say "Mickey: omakvm's fork ($(cat "$HOME/.local/bin/.mickey-omakvm-fork"))" || say "Mickey: the official build (no typing mirror)"
+  [[ -f $espanso_dropin ]] && say "typing mirror: asked for" || say "typing mirror: off"
+  [[ -f $espanso_rule ]] && say "udev rule: installed" || say "udev rule: MISSING (the keys would also be typed on this PC)"
+  if node="$(mirror_node)"; then
+    if udevadm info -q property -n "$node" 2>/dev/null | grep -q '^LIBINPUT_IGNORE_DEVICE=1'; then
+      say "mirror keyboard: $node, ignored by the desktop"
+    else
+      say "mirror keyboard: $node, NOT ignored by the desktop"
+    fi
+  else
+    say "mirror keyboard: none (Mickey is not running with it)"
+  fi
+  say "espanso: $(systemctl --user is-active espanso.service 2>/dev/null || true)"
+  grep -qs '^backend: *Inject' "$espanso_config" && say "espanso types its text key by key (backend: Inject)" \
+    || say "espanso may paste long text from this PC's clipboard, which the other PC does not have"
+}
+
+espanso_on() {
+  local from="" dir here
+  [[ ${1:-} == --from ]] && from="${2:-}"
+  [[ $(uname -m) == x86_64 ]] || die "the fork is built for x86-64 only for now"
+  command -v espanso >/dev/null 2>&1 || die "espanso is not installed on this PC"
+  here="$(command -v mickey || true)"
+  [[ $here == "$HOME/.local/bin/mickey" ]] \
+    || die "this replaces Mickey in ~/.local/bin; yours is ${here:-not installed}. Install it with: omakvm install"
+
+  step "Getting the fork of Mickey"
+  dir="$(fetch_release fork-x86_64 "$from")"
+  "$dir/mickey" --version >/dev/null 2>&1 || die "the fork does not start on this PC"
+
+  step "Keeping the desktop from reading the mirror (sudo asks for your password once)"
+  if [[ -f $espanso_rule ]]; then say "The udev rule is already there"
+  else sudo "$(readlink -f "$0")" root-espanso; fi
+
+  step "Installing"
+  [[ -f $HOME/.local/bin/.mickey-omakvm-fork ]] || {
+    cp -p "$HOME/.local/bin/mickey" "$HOME/.local/bin/mickey.official"
+    [[ -f $HOME/.local/bin/mickey-ui ]] && cp -p "$HOME/.local/bin/mickey-ui" "$HOME/.local/bin/mickey-ui.official"
+  }
+  install -m 755 "$dir/mickey" "$HOME/.local/bin/mickey.new" && mv "$HOME/.local/bin/mickey.new" "$HOME/.local/bin/mickey"
+  install -m 755 "$dir/mickey-ui" "$HOME/.local/bin/mickey-ui.new" && mv "$HOME/.local/bin/mickey-ui.new" "$HOME/.local/bin/mickey-ui"
+  cat "$dir/SOURCE-COMMIT" >"$HOME/.local/bin/.mickey-omakvm-fork"
+  mkdir -p "$(dirname "$espanso_dropin")"
+  printf '%s\n' '# omakvm espanso on' '[Service]' 'Environment=MICKEY_TYPING_MIRROR=1' >"$espanso_dropin"
+  # Mickey's updater would put the official build back.
+  mkdir -p "$config_dir"; touch "$config_dir/config.toml"
+  if grep -q '^\[updates\]' "$config_dir/config.toml"; then
+    sed -i '/^\[updates\]/,/^\[/ s/^check *=.*/check = false/' "$config_dir/config.toml"
+    grep -A3 '^\[updates\]' "$config_dir/config.toml" | grep -q '^check = false' \
+      || sed -i '/^\[updates\]/a check = false' "$config_dir/config.toml"
+  else
+    printf '\n[updates]\ncheck = false\n' >>"$config_dir/config.toml"
+  fi
+  # Long text would otherwise be pasted from this PC's clipboard with Ctrl+V,
+  # and the other PC has another clipboard: type it key by key instead.
+  if [[ -f $espanso_config ]] && ! grep -q '^backend:' "$espanso_config"; then
+    cp -p "$espanso_config" "$espanso_config.bak.$(date +%Y%m%d%H%M%S)"
+    printf '%s\n' '# omakvm espanso on: type every expansion key by key, so it also reaches another PC' 'backend: Inject' >>"$espanso_config"
+  fi
+
+  step "Restarting Mickey and espanso"
+  systemctl --user daemon-reload
+  systemctl --user restart mickey.service
+  sleep 2
+  systemctl --user restart espanso.service 2>/dev/null || espanso restart >/dev/null 2>&1 || true
+  sleep 3
+  espanso_status
+  say
+  say "Try it: take the keyboard to another PC and type one of your triggers there."
+  say "Both PCs need the same keyboard layout: the text is typed as keys."
+}
+
+espanso_off() {
+  if [[ -f $HOME/.local/bin/mickey.official ]]; then
+    mv "$HOME/.local/bin/mickey.official" "$HOME/.local/bin/mickey"
+    [[ -f $HOME/.local/bin/mickey-ui.official ]] && mv "$HOME/.local/bin/mickey-ui.official" "$HOME/.local/bin/mickey-ui"
+  fi
+  rm -f "$HOME/.local/bin/.mickey-omakvm-fork" "$espanso_dropin"
+  rmdir "$(dirname "$espanso_dropin")" 2>/dev/null || true
+  [[ -f $espanso_config ]] && sed -i '/^# omakvm espanso on:/d; /^backend: Inject$/d' "$espanso_config"
+  [[ -f $config_dir/config.toml ]] && sed -i '/^\[updates\]/,/^\[/ s/^check = false$/check = true/' "$config_dir/config.toml"
+  systemctl --user daemon-reload
+  systemctl --user restart mickey.service 2>/dev/null || true
+  systemctl --user restart espanso.service 2>/dev/null || true
+  say "Back to the official Mickey, without the typing mirror."
+  [[ -f $espanso_rule ]] && say "The udev rule stays (it does nothing without the mirror); to remove it: sudo rm $espanso_rule"
 }
 
 # ------------------------------------------------------------------- add-ssh
@@ -363,19 +498,19 @@ echo "s:$(command -v systemctl >/dev/null 2>&1 && echo yes)"')" || die "cannot r
   [[ $(fact s) == yes ]] || die "$target has no systemd; Mickey's service needs it. Nothing was changed."
   [[ $display =~ ^:[0-9]+$ ]] || display=":0"
 
+  # What counts is the system's programs, not the kernel: a Raspberry Pi
+  # often runs a 32-bit system under a 64-bit kernel.
   case "$machine" in
-    x86_64) arch=x86_64; need_glibc=$GLIBC_X86_64 ;;
-    aarch64|arm64) arch=aarch64; need_glibc=$GLIBC_AARCH64 ;;
-    arm*) bits=32; arch="" ;;
-    *) die "$target is a $machine machine; Mickey runs on x86-64 and ARM64 Linux only. Nothing was changed." ;;
+    x86_64)
+      [[ $bits != 32 ]] || die "$target runs a 32-bit x86 system; there is no Mickey build for it. Nothing was changed."
+      arch=x86_64; need_glibc=$GLIBC_X86_64 ;;
+    aarch64|arm64|armv8l)
+      if [[ $bits == 32 ]]; then arch=armv7; need_glibc=$GLIBC_ARMV7
+      else arch=aarch64; need_glibc=$GLIBC_AARCH64; fi ;;
+    armv7l) arch=armv7; need_glibc=$GLIBC_ARMV7 ;;
+    armv6l) die "$target is an ARMv6 board (Raspberry Pi 1 or Zero); the 32-bit build needs ARMv7 or newer. Nothing was changed." ;;
+    *) die "$target is a $machine machine; there is no Mickey build for it. Nothing was changed." ;;
   esac
-  # A 64-bit kernel under a 32-bit system (common on Raspberry Pi) still
-  # cannot run 64-bit programs.
-  if [[ $bits == 32 || -z ${arch:-} ]]; then
-    die "$target runs a 32-bit system ($machine, ${bits:-?}-bit programs). Mickey only works on 64-bit Linux:
-it writes the kernel's 64-bit input events, and a 32-bit build would type nothing.
-It needs a 64-bit system image (or a change in Mickey itself). Nothing was changed there."
-  fi
   if [[ -n $glibc && $(printf '%s\n%s\n' "$glibc" "$need_glibc" | sort -V | head -n 1) != "$need_glibc" ]]; then
     die "$target has glibc $glibc; this Mickey build needs $need_glibc or newer (a newer system image). Nothing was changed."
   fi
@@ -437,7 +572,9 @@ It needs a 64-bit system image (or a change in Mickey itself). Nothing was chang
   remote 'cd ~/.local/bin && chmod 755 mickey.new && mv mickey.new mickey && { [ ! -f mickey-ui.new ] || { chmod 755 mickey-ui.new && mv mickey-ui.new mickey-ui; }; }'
   # That PC only receives: it never sends its own keyboard anywhere.
   # shellcheck disable=SC2016
-  remote 'c=~/.config/mickey/config.toml; [ -f "$c" ] || printf "[this_pc]\nname = \"%s\"\ncontrols_others = false\ncontrolled = true\n" "'"$(toml_escape "$name")"'" > "$c"'
+  # Nor does it look for updates: Mickey's updater only knows its x86-64
+  # release, and this script is what updates that PC.
+  remote 'c=~/.config/mickey/config.toml; [ -f "$c" ] || printf "[this_pc]\nname = \"%s\"\ncontrols_others = false\ncontrolled = true\n\n[updates]\ncheck = false\n" "'"$(toml_escape "$name")"'" > "$c"'
   if [[ $mode == kiosk ]]; then
     kiosk_unit "$ruser" "$display" "$rhome" | remote 'cat > ~/.config/mickey/mickey.service.omakvm'
     # shellcheck disable=SC2016
@@ -545,7 +682,15 @@ case "${1:-}" in
   install) shift; install_here "$@" ;;
   add-ssh) shift; add_ssh "$@" ;;
   doctor) doctor ;;
+  espanso)
+    case "${2:-status}" in
+      on) shift 2; espanso_on "$@" ;;
+      off) espanso_off ;;
+      status) espanso_status ;;
+      *) die "omakvm espanso on|off|status" ;;
+    esac ;;
   root-setup) shift; root_setup "$@" ;;
+  root-espanso) root_espanso ;;
   -h|--help|help|"") usage ;;
   *) die "unknown command: $1 (try: omakvm --help)" ;;
 esac

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rob-d3v.omakvm",
   "name": "omakvm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "rob-d3v",
   "license": "MIT",
   "description": "One keyboard and mouse for the PCs on your network, arranged like monitors: drag each PC next to your screens and the cursor crosses the edge. Screens by Monitor Manager, network PCs by Mickey. Unofficial community plugin.",
