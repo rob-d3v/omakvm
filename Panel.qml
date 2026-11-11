@@ -78,6 +78,13 @@ Item {
   property bool adding: false
   property string confirmRemove: ""
   property bool pendingPeerSave: false
+  // False until config.toml was read once since the panel loaded it: a PC
+  // that shows up after that is a newcomer.
+  property bool peersLoaded: false
+  // True while a save only stores a newcomer's first place: its message stays.
+  property bool announcing: false
+  property var sshKeys: []
+  property string sshKey: ""
 
   // Undo/redo keep whole-layout snapshots; the depths are plain ints because
   // pushing to a JS array doesn't notify bindings.
@@ -199,6 +206,7 @@ Item {
     root.configReadable = false
     root.livePeerSnapshot = ({})
     root.peers = []
+    root.peersLoaded = false
     configFile.reload()
     mickeyFile.reload()
     readMonitors.running = true
@@ -251,11 +259,12 @@ Item {
     printErrors: false
     watchChanges: true
     onFileChanged: reload()
-    onLoaded: { root.mickeyConfigText = text(); root.mickeyConfigReadable = true; root.rebuildPeers() }
+    onLoaded: { root.mickeyConfigText = text(); root.mickeyConfigReadable = true; root.rebuildPeers(); root.peersLoaded = true }
     onLoadFailed: function(err) {
       root.mickeyConfigText = ""
       root.mickeyConfigReadable = err === FileViewError.FileNotFound
       root.rebuildPeers()
+      root.peersLoaded = root.mickeyConfigReadable
     }
     onSaved: root.afterPeersSaved()
     onSaveFailed: function(err) { root.statusText = strings.t("status.mickeyWriteFailed") }
@@ -263,16 +272,33 @@ Item {
 
   function rebuildPeers() {
     var fresh = Net.keepMonitors(Net.buildPeers(root.mickeyConfigText, root.peersRaw), root.peers)
-    if (root.peersDirty) {
+    var wasDirty = root.peersDirty
+    if (wasDirty) {
       // keep what is being edited
-      var mine = Net.snapshot(root.peers)
-      Net.restore(fresh, mine)
+      Net.restore(fresh, Net.snapshot(root.peers))
+    }
+    // A PC paired while the panel is open (Add PC, or the terminal it opened)
+    // has no place yet: it goes to the right of everything, so the cursor can
+    // reach it at once, and is selected for the owner to drag where it sits.
+    var known = {}
+    root.peers.forEach(function(p) { known[p.name] = true })
+    var newcomers = []
+    if (root.peersLoaded && root.opened && root.monitors.length) {
+      fresh.forEach(function(p) {
+        if (!known[p.name] && !p.placed) { Net.place(root.localRects(), fresh, p); newcomers.push(p.name) }
+      })
     }
     var saved = Net.snapshot(Net.buildPeers(root.mickeyConfigText, ""))
     root.peers = fresh
     root.livePeerSnapshot = saved
     if (root.selectedPeer !== "" && !fresh.some(function(p) { return p.name === root.selectedPeer }))
       root.selectedPeer = ""
+    if (newcomers.length) {
+      root.adding = false
+      root.selectedPeer = newcomers[0]
+      root.statusText = strings.t("status.newcomer").arg(newcomers.join(", "))
+      if (!wasDirty && !mickeyBackupProc.running) { root.announcing = true; root.savePeers() }
+    }
     root.changed()
   }
 
@@ -400,10 +426,31 @@ Item {
     })
   }
 
+  // Private keys in ~/.ssh (the ones with a .pub next to them), for the
+  // "SSH key" choice. Paths with unusual characters are left out: the choice
+  // goes into a command line.
+  Process {
+    id: keysProc
+    command: ["sh", "-c", 'for f in "$HOME"/.ssh/*.pub; do k="${f%.pub}"; [ -f "$k" ] && echo "$k"; done']
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.sshKeys = String(text).split("\n").filter(function(k) {
+        return /^\/[A-Za-z0-9_.\/-]+$/.test(k)
+      }).slice(0, 40)
+    }
+  }
+
+  function openAdd() {
+    root.discovered = []
+    root.adding = true
+    keysProc.running = true
+  }
+
   function addOverSsh(target) {
     target = String(target || "").trim()
     if (!Net.validSshTarget(target)) { root.statusText = strings.t("status.badSsh"); return }
-    root.terminal("'" + root.pluginDir + "/bin/omakvm' add-ssh " + target)
+    var key = root.sshKeys.indexOf(root.sshKey) >= 0 ? " -i '" + root.sshKey + "'" : ""
+    root.terminal("'" + root.pluginDir + "/bin/omakvm' add-ssh" + key + " " + target)
     root.statusText = strings.t("status.sshStarted").arg(target)
   }
 
@@ -467,8 +514,11 @@ Item {
     root.pendingPeerSave = false
     root.afterSave = function() {
       if (root.mickeyState !== "running") { root.statusText = strings.t("status.savedNotRunning"); return }
+      var quiet = root.announcing
+      root.announcing = false
       root.mickey(["arranged"], function(ok, out) {
-        root.statusText = ok ? strings.t("status.savedAll") : strings.t("status.mickeyError").arg(Net.cleanText(out, 160))
+        if (!ok) root.statusText = strings.t("status.mickeyError").arg(Net.cleanText(out, 160))
+        else if (!quiet) root.statusText = strings.t("status.savedAll")
       })
     }
     root.writeMickeyConfig(Net.setPositions(root.mickeyConfigText, root.peers))
@@ -1459,6 +1509,15 @@ Item {
                   onClicked: root.addOverSsh(sshField.text)
                 }
               }
+              Dropdown {
+                width: parent.width
+                label: strings.t("add.sshKey")
+                value: root.sshKey
+                options: [{ label: strings.t("add.sshKeyAuto"), value: "" }].concat(root.sshKeys.map(function(k) {
+                  return { label: k.replace(/^.*\//, ""), value: k }
+                }))
+                onChanged: function(v) { root.sshKey = v }
+              }
               PlainText {
                 width: parent.width
                 wrapMode: Text.WordWrap
@@ -1571,7 +1630,7 @@ Item {
                 text: strings.t("side.add")
                 bordered: true
                 visible: root.mickeyState !== "missing" && root.mickeyState !== "unknown"
-                onClicked: { root.discovered = []; root.adding = true }
+                onClicked: root.openAdd()
               }
             }
 

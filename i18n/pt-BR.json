@@ -88,7 +88,7 @@
   "add.byAddressHint": "Para um PC em outro segmento de rede. Nesse PC, permita o pareamento antes (configurações do Mickey, ou o botão abaixo, lá).",
   "add.overSsh": "Por SSH, para um PC sem tela onde conferir o código",
   "add.setUp": "Configurar",
-  "add.overSshHint": "Abre um terminal que instala o Mickey lá e pareia os dois PCs pelo SSH, sem o código. Para placas e quiosques que você já acessa por SSH (Linux x86-64 e ARM64).",
+  "add.overSshHint": "Abre um terminal que instala o Mickey lá, pareia os dois PCs pelo SSH, sem o código, e inicia. Você digita as senhas daquele PC ali, se ele pedir. Para placas e quiosques que você já acessa por SSH (Linux de 64 bits, x86 ou ARM).",
   "add.letPair": "Permitir que um PC pareie com este",
   "add.letPairTip": "Por 2 minutos, um PC que adicionar este por endereço pode pedir o pareamento.",
   "add.close": "Pronto",
@@ -122,5 +122,8 @@
   "bar.remote": "Teclado e mouse em %1. Segure o Shift direito por 3 s para trazer de volta.",
   "bar.local": "Telas e PCs da rede",
   "bar.off": "Telas e PCs da rede (o Mickey não está rodando)",
-  "status.attached": "%1 foi encostado na borda mais próxima: um PC que não encosta em nenhuma tela não é alcançado pelo cursor."
+  "status.attached": "%1 foi encostado na borda mais próxima: um PC que não encosta em nenhuma tela não é alcançado pelo cursor.",
+  "status.newcomer": "PC novo: %1, colocado à direita das suas telas. Arraste para onde ele fica de verdade e salve.",
+  "add.sshKey": "Chave SSH",
+  "add.sshKeyAuto": "Automática (suas chaves padrão, ou a senha)"
 }

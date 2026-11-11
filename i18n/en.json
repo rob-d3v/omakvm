@@ -88,7 +88,7 @@
   "add.byAddressHint": "For a PC on another network segment. On that PC, let a new PC pair first (Mickey settings, or the button below there).",
   "add.overSsh": "Over SSH, for a PC without a screen to compare codes on",
   "add.setUp": "Set up",
-  "add.overSshHint": "Opens a terminal that installs Mickey there and pairs the two PCs through SSH instead of the code. For boards and kiosks you already reach by SSH (x86-64 and ARM64 Linux).",
+  "add.overSshHint": "Opens a terminal that installs Mickey there, pairs the two PCs through SSH instead of the code, and starts it. You type that PC's passwords there if it asks. For boards and kiosks you already reach by SSH (64-bit Linux, x86 or ARM).",
   "add.letPair": "Let a PC pair with this one",
   "add.letPairTip": "For 2 minutes, a PC that adds this one by address may ask to pair.",
   "add.close": "Done",
@@ -122,5 +122,8 @@
   "bar.remote": "Keyboard and mouse on %1. Hold Right Shift for 3 s to bring them home.",
   "bar.local": "Screens and network PCs",
   "bar.off": "Screens and network PCs (Mickey is not running)",
-  "status.attached": "%1 moved against the nearest edge: a PC that touches no screen cannot be reached with the cursor."
+  "status.attached": "%1 moved against the nearest edge: a PC that touches no screen cannot be reached with the cursor.",
+  "status.newcomer": "New PC: %1, placed to the right of your screens. Drag it where it really sits and Save.",
+  "add.sshKey": "SSH key",
+  "add.sshKeyAuto": "Automatic (your default keys, or the password)"
 }

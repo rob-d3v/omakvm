@@ -119,17 +119,29 @@ $P/bin/omakvm add-ssh user@192.168.0.20
 $P/bin/omakvm add-ssh --name "Wall display" -i ~/.ssh/id_ed25519 user@192.168.0.20
 ```
 
-The panel's **Add PC → Over SSH** opens a terminal with the same command. It:
+The panel's **Add PC → Over SSH** opens a terminal with the same command (pick the
+SSH key there, or leave it on automatic and type the password when ssh asks). It:
 
-1. copies Mickey to `~/.local/bin` on that PC (the official release on x86-64; on
-   ARM64, a build of the same source, see below);
-2. with `sudo` there: the uinput udev rule, the `input` group for that user, the
-   firewall ports if ufw is on;
-3. reads each PC's public Mickey key over SSH and writes it into the other's
-   `trusted_peers`, which is what pressing *Pair* on both screens does;
-4. writes a `config.toml` there that only lets the PC be controlled
-   (`controls_others = false`), and adds it as a peer here;
-5. starts Mickey there as a service.
+1. opens one SSH connection and looks at that PC: architecture, system, who owns the
+   screen. A PC it cannot serve is told apart here, before anything is changed
+   (see *What it cannot do* below);
+2. copies Mickey to `~/.local/bin` there (the official release on x86-64; on ARM64, a
+   build of the same source, see below) and writes a `config.toml` that only lets the
+   PC be controlled (`controls_others = false`);
+3. runs one step with `sudo` there, which may ask for that user's password: the uinput
+   udev rule, the `input` group, `libpulse0` if it is missing, the firewall ports if
+   ufw is on, and the service;
+4. reads each PC's public Mickey key over SSH and writes it into the other's
+   `trusted_peers`, which is what pressing *Pair* on both screens does, and adds the
+   PC as a peer here. A PC flashed again since it was paired gets its new key;
+5. waits for the PC to come online and says what it found.
+
+With the panel open, the new PC appears to the right of your screens, already saved,
+so the cursor reaches it at once. Drag it where it really sits and **Save**.
+
+The SSH key that worked for a PC is remembered (`~/.cache/omakvm/ssh-keys`). Keys are
+never tried one after another: a server that sees several fail starts refusing the
+connection.
 
 Two kinds of target are told apart on their own (`--kiosk` / `--session` override):
 
@@ -139,6 +151,15 @@ Two kinds of target are told apart on their own (`--kiosk` / `--session` overrid
   group, and is handed a copy of the X server's access cookie when it starts.
   Without it Mickey could type but not see the kiosk's monitors or clipboard, and
   the cursor could not cross at an edge.
+
+What it cannot do:
+
+- **32-bit systems** (a Raspberry Pi running a 32-bit Raspberry Pi OS, even on a
+  64-bit kernel). Mickey writes the kernel's 64-bit input events; it needs a 64-bit
+  system image.
+- **glibc older than 2.31** on ARM64, or 2.35 on x86-64.
+- **A Wayland kiosk without the RemoteDesktop portal** gets the keyboard and mouse,
+  but Mickey cannot learn its monitors, so there is no edge to cross: use the hotkeys.
 
 To undo it on that PC:
 
@@ -156,8 +177,8 @@ and remove the PC in the panel here.
 Mickey publishes x86-64 builds only. For ARM64 targets (Raspberry Pi and the like),
 this repository's releases carry `mickey-linux-aarch64.tar.gz`: Mickey's source at
 the tag named in the release, unchanged, compiled by
-[`packaging/build-aarch64.sh`](packaging/build-aarch64.sh) (Debian bookworm,
-glibc 2.36). `SOURCE-COMMIT` inside the tarball names the commit, and Mickey's
+[`packaging/build-aarch64.sh`](packaging/build-aarch64.sh) (Debian bullseye,
+glibc 2.31). `SOURCE-COMMIT` inside the tarball names the commit, and Mickey's
 GPL-3.0 `LICENSE` is in it. Build your own and pass it with `--from` if you prefer:
 
 ```bash
