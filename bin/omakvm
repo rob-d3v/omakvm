@@ -452,7 +452,7 @@ It needs a 64-bit system image (or a change in Mickey itself). Nothing was chang
   local tty=()
   [[ -t 0 ]] && tty=(-t)
   ssh "${tty[@]}" "${ssh_opts[@]}" "$target" "sudo sh $rhome/.config/mickey/omakvm-root.sh $ruser $mode $rhome/.config/mickey/mickey.service.omakvm" \
-    || die "the root step failed on $name. Mickey's files are in $rhome/.local/bin and $rhome/.config/mickey there; nothing is running."
+    || die "the root step failed on $name. Mickey's files are in $rhome/.local/bin and $rhome/.config/mickey there; no service was changed. Run it again from a terminal to type the password."
   remote 'rm -f ~/.config/mickey/omakvm-root.sh ~/.config/mickey/mickey.service.omakvm'
 
   if [[ $mode == session ]]; then
