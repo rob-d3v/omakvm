@@ -77,6 +77,8 @@ Item {
   property var discovered: []
   property bool adding: false
   property string confirmRemove: ""
+  // The network PC whose name and address are being edited.
+  property string editingPeer: ""
   property bool pendingPeerSave: false
   // False until config.toml was read once since the panel loaded it: a PC
   // that shows up after that is a newcomer.
@@ -465,6 +467,47 @@ Item {
     }
   }
 
+  // Editing a PC: its name and address in its [[peer]] table (a PC that
+  // moved to another network gets a new address), then Mickey starts again,
+  // as it reads the list of PCs only when it starts.
+  function startEdit() {
+    if (!root.peer) return
+    root.confirmRemove = ""
+    editNameField.text = root.peer.name
+    editAddrField.text = root.peer.address
+    root.editingPeer = root.peer.name
+  }
+
+  function saveEdit() {
+    var name = root.editingPeer
+    var newName = editNameField.text.trim()
+    var address = Net.normalizeAddress(editAddrField.text)
+    if (!address) { root.statusText = strings.t("status.badAddress"); return }
+    if (!Net.validName(newName)) { root.statusText = strings.t("status.badName"); return }
+    var text = Net.editPeer(root.mickeyConfigText, name, newName, address)
+    if (text === null) { root.statusText = strings.t("status.nameTaken").arg(newName); return }
+    root.editingPeer = ""
+    root.peers.forEach(function(o) { if (o.name === name) { o.name = newName; o.address = address } })
+    if (root.selectedPeer === name) root.selectedPeer = newName
+    root.afterSave = function() {
+      editProc.peerName = newName
+      editProc.command = ["sh", "-c", root.pathPrefix
+        + 'systemctl --user restart mickey.service 2>/dev/null || { mickey quit; mickey start; }; exit 0']
+      editProc.running = true
+    }
+    root.changed()
+    root.writeMickeyConfig(Net.setPositions(text, root.peers))
+  }
+
+  Process {
+    id: editProc
+    property string peerName: ""
+    onExited: function(code) {
+      root.statusText = strings.t("status.edited").arg(editProc.peerName)
+      root.probe()
+    }
+  }
+
   function removePeer(name) {
     var p = root.peers.find(function(o) { return o.name === name })
     var text = Net.removePeer(root.mickeyConfigText, name)
@@ -677,8 +720,8 @@ Item {
 
   // ---------------------------------------------------------------- editing
 
-  function select(i) { root.selectedPeer = ""; root.confirmRemove = ""; root.selectedIndex = i; root.changed() }
-  function selectPeer(name) { root.confirmRemove = ""; root.selectedPeer = name; root.changed() }
+  function select(i) { root.selectedPeer = ""; root.confirmRemove = ""; root.editingPeer = ""; root.selectedIndex = i; root.changed() }
+  function selectPeer(name) { root.confirmRemove = ""; root.editingPeer = ""; root.selectedPeer = name; root.changed() }
 
   // Call before every mutation of the layout.
   function pushUndo() {
@@ -1787,7 +1830,7 @@ Item {
             }
 
             Row {
-              visible: !!root.peer && root.confirmRemove === ""
+              visible: !!root.peer && root.confirmRemove === "" && root.editingPeer === ""
               spacing: Style.spacing.sm
               Button {
                 text: root.peer && root.focusPeer === root.peer.name ? strings.t("peer.bringBack") : strings.t("peer.sendKeyboard")
@@ -1797,9 +1840,42 @@ Item {
                 onClicked: root.goTo(root.focusPeer === root.peer.name ? "" : root.peer.name)
               }
               Button {
+                text: strings.t("peer.edit")
+                bordered: true
+                onClicked: root.startEdit()
+              }
+              Button {
                 text: strings.t("peer.remove")
                 bordered: true
                 onClicked: root.confirmRemove = root.peer ? root.peer.name : ""
+              }
+            }
+
+            Column {
+              visible: !!root.peer && root.editingPeer !== "" && root.editingPeer === root.selectedPeer
+              width: sideCol.width
+              spacing: Style.spacing.sm
+              PlainText { text: strings.t("peer.editAddress"); color: root.muted; font.pixelSize: Style.font.caption }
+              TextField {
+                id: editAddrField
+                width: parent.width
+                placeholderText: "192.168.0.10"
+                foreground: root.foreground
+                accent: root.accent
+                onAccepted: root.saveEdit()
+              }
+              PlainText { text: strings.t("peer.editName"); color: root.muted; font.pixelSize: Style.font.caption }
+              TextField {
+                id: editNameField
+                width: parent.width
+                foreground: root.foreground
+                accent: root.accent
+                onAccepted: root.saveEdit()
+              }
+              Row {
+                spacing: Style.spacing.sm
+                Button { text: strings.t("peer.editCancel"); bordered: true; onClicked: root.editingPeer = "" }
+                Button { text: strings.t("peer.editSave"); bordered: true; active: true; onClicked: root.saveEdit() }
               }
             }
 

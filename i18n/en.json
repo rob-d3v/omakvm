@@ -58,6 +58,11 @@
   "peer.bringBack": "Bring keyboard back",
   "peer.sendKeyboardTip": "Hold Right Shift for 3 s to bring the keyboard and mouse home at any time.",
   "peer.remove": "Remove",
+  "peer.edit": "Edit",
+  "peer.editAddress": "Address (IP, or IP:port)",
+  "peer.editName": "Name",
+  "peer.editCancel": "Cancel",
+  "peer.editSave": "Save",
   "peer.removeAsk": "Remove this PC? It stops being trusted and Mickey restarts.",
   "peer.removeNo": "Keep",
   "peer.removeYes": "Remove",
@@ -125,5 +130,7 @@
   "status.attached": "%1 moved against the nearest edge: a PC that touches no screen cannot be reached with the cursor.",
   "status.newcomer": "New PC: %1, placed to the right of your screens. Drag it where it really sits and Save.",
   "add.sshKey": "SSH key",
-  "add.sshKeyAuto": "Automatic (your default keys, or the password)"
+  "add.sshKeyAuto": "Automatic (your default keys, or the password)",
+  "status.nameTaken": "There is already a PC named %1.",
+  "status.edited": "%1 saved; Mickey started again."
 }

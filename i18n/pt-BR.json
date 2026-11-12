@@ -58,6 +58,11 @@
   "peer.bringBack": "Trazer o teclado de volta",
   "peer.sendKeyboardTip": "Segure o Shift direito por 3 s para trazer teclado e mouse de volta a qualquer momento.",
   "peer.remove": "Remover",
+  "peer.edit": "Editar",
+  "peer.editAddress": "Endereço (IP, ou IP:porta)",
+  "peer.editName": "Nome",
+  "peer.editCancel": "Cancelar",
+  "peer.editSave": "Salvar",
   "peer.removeAsk": "Remover este PC? Ele deixa de ser confiável e o Mickey reinicia.",
   "peer.removeNo": "Manter",
   "peer.removeYes": "Remover",
@@ -125,5 +130,7 @@
   "status.attached": "%1 foi encostado na borda mais próxima: um PC que não encosta em nenhuma tela não é alcançado pelo cursor.",
   "status.newcomer": "PC novo: %1, colocado à direita das suas telas. Arraste para onde ele fica de verdade e salve.",
   "add.sshKey": "Chave SSH",
-  "add.sshKeyAuto": "Automática (suas chaves padrão, ou a senha)"
+  "add.sshKeyAuto": "Automática (suas chaves padrão, ou a senha)",
+  "status.nameTaken": "Já existe um PC chamado %1.",
+  "status.edited": "%1 salvo; Mickey reiniciado."
 }

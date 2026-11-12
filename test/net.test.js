@@ -127,6 +127,15 @@ controls_others = true
 `)
 check('remove peer: unknown', N.removePeer(config, 'Nobody'), null)
 
+{
+  const one = '[[peer]]\nname = "NIVA"\nposition = [3840, 689]\naddress = "192.168.18.13:4242"\nkey = "ab"\n\n[[peer]]\nname = "B"\naddress = "10.0.0.2:4242"\n'
+  check('edit peer: new address, rest kept', N.editPeer(one, 'NIVA', 'NIVA', '192.168.3.15:4242'),
+    '[[peer]]\nname = "NIVA"\nposition = [3840, 689]\naddress = "192.168.3.15:4242"\nkey = "ab"\n\n[[peer]]\nname = "B"\naddress = "10.0.0.2:4242"\n')
+  check('edit peer: rename', N.parseConfigPeers(N.editPeer(one, 'NIVA', 'NIVA 3.15', '192.168.3.15:4242'))[0].name, 'NIVA 3.15')
+  check('edit peer: name taken', N.editPeer(one, 'NIVA', 'B', '192.168.3.15:4242'), null)
+  check('edit peer: unknown', N.editPeer(one, 'X', 'X', '1.2.3.4:4242'), null)
+}
+
 // --- peers on the desktop
 const peers = N.buildPeers(config, peersText)
 check('build: merged', peers.map(p => [p.name, p.online, p.placed, p.x, p.y, p.monitors.length]),

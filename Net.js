@@ -268,6 +268,26 @@ function setPositions(text, peers) {
   return text
 }
 
+// Change one peer's name and address, leaving every other line as it is.
+// Returns null when no peer has `name`, or `newName` is another peer's.
+function editPeer(text, name, newName, newAddress) {
+  var lines = String(text || "").split("\n")
+  var range = peerRange(lines, name)
+  if (!range) return null
+  if (newName !== name && peerRange(lines, newName)) return null
+  var nameAt = -1, addressAt = -1
+  for (var i = range[0] + 1; i < range[1]; i++) {
+    var kv = keyOf(lines[i])
+    if (!kv) continue
+    if (kv[0] === "name") nameAt = i
+    if (kv[0] === "address") addressAt = i
+  }
+  lines[nameAt] = "name = " + tomlString(newName)
+  if (addressAt >= 0) lines[addressAt] = "address = " + tomlString(newAddress)
+  else lines.splice(nameAt + 1, 0, "address = " + tomlString(newAddress))
+  return joinLines(lines)
+}
+
 // Take one [[peer]] table out. Returns null when no peer has that name.
 function removePeer(text, name) {
   var lines = String(text || "").split("\n")
