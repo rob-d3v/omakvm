@@ -37,8 +37,10 @@ projects and does none of the hard work itself:
   the keyboard home.
 - English and Brazilian Portuguese, following Omarchy's language.
 
-The way home always works, whatever the layout says: hold **Right Shift** for 3
-seconds, or press **AltGr + Right Shift**.
+The way home always works, whatever the layout says: tap **Super twice** quickly,
+hold **Right Shift** for 3 seconds, or press **AltGr + Right Shift**. Pushing out
+any part of a PC's edge that faces this desktop comes home too, even where the two
+desktops do not line up.
 
 ## Requirements
 

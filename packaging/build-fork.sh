@@ -8,7 +8,7 @@
 set -euo pipefail
 arch="${1:?x86_64 or armv7}"
 # The commit of https://github.com/rob-d3v/mickey (branch omakvm) this builds.
-ref="${2:-5268bf74f06709e8be95c6ce979212460cceed9d}"
+ref="${2:-53b1701446e7400d0ef9eb96dc565a21391d544f}"
 # rustup's installer, checked against this hash before it runs.
 RUSTUP_VERSION="1.28.2"
 RUSTUP_SHA256="20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"

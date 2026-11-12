@@ -51,7 +51,7 @@
   "peer.side.below": "below this PC",
   "peer.side.near": "next to another PC",
   "peer.onLayout": "On the layout",
-  "peer.edgeHint": "Push the cursor across the shared edge and the keyboard goes with it. AltGr + Right Shift brings it back.",
+  "peer.edgeHint": "Push the cursor across the shared edge and the keyboard goes with it. Super tapped twice (or AltGr + Right Shift) brings it back.",
   "peer.noEdgeHint": "It touches no screen, so the cursor cannot cross. Drag it against a screen, or use the hotkeys.",
   "peer.hotkeysHint": "Off the layout: reach it with AltGr + Right Shift, or with Send keyboard.",
   "peer.sendKeyboard": "Send keyboard",
